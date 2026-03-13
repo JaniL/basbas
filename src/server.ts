@@ -20,13 +20,26 @@ const startMsg =
   ", \u001b[33mtook \u001b[39m";
 const startedTime = new Date().toString();
 
-const referralKey = "t7c5hxB";
-const restaurantId = "589";
 const baseUrl = "https://v2.tableonline.fi/instabook/bookings";
-const sourceUrl =
-  `${baseUrl}/availabilities/${referralKey}/${restaurantId}/` +
-  "{persons}?locale=fi&date={date}";
-const bookingUrl = `${baseUrl}/${referralKey}/`;
+
+type Venue = {
+  name: string;
+  referralKey: string;
+  restaurantId: string;
+};
+
+const venues: Record<"bistro" | "kulma", Venue> = {
+  bistro: {
+    name: "BasBas",
+    referralKey: "t7c5hxB",
+    restaurantId: "589"
+  },
+  kulma: {
+    name: "BasBas Kulma",
+    referralKey: "kxSrGpi",
+    restaurantId: "1100"
+  }
+};
 
 const MAX_PERSONS = 8;
 const MIN_PERSONS = 1;
@@ -35,10 +48,10 @@ const DAY_COUNT = 33;
 
 const availabilityCache = new TtlCache<string>(CACHE_TTL_MS);
 
-const buildSourceUrl = (date: Date, persons: number): string =>
-  sourceUrl
-    .replace("{persons}", String(persons))
-    .replace("{date}", formatReverseIsoDate(date));
+const buildSourceUrl = (date: Date, persons: number, venue: Venue): string =>
+  `${baseUrl}/availabilities/${venue.referralKey}/${venue.restaurantId}/${persons}?locale=fi&date=${formatReverseIsoDate(date)}`;
+
+const buildBookingUrl = (venue: Venue): string => `${baseUrl}/${venue.referralKey}/`;
 
 const clampPersons = (value: number): number => {
   if (Number.isNaN(value)) {
@@ -58,19 +71,20 @@ const notFound = (res: ServerResponse): void => {
   res.end();
 };
 
-const fallbackMarkup = (date: Date): string =>
-  `<section><p class="alert">Emme voineet hakea vapaita aikoja ${formatDate(date)}. <a href="${bookingUrl}" target="_blank" rel="noreferrer">Varaa suoraan TableOnline-palvelusta</a>.</p></section>`;
+const fallbackMarkup = (date: Date, venue: Venue): string =>
+  `<section><p class="alert">Emme voineet hakea vapaita aikoja ${formatDate(date)}. <a href="${buildBookingUrl(venue)}" target="_blank" rel="noreferrer">Varaa suoraan TableOnline-palvelusta</a>.</p></section>`;
 
-const renderArticle = (day: DayAvailability): string => {
-  const details = day.markup ?? fallbackMarkup(day.date);
+const renderArticle = (day: DayAvailability, venue: Venue): string => {
+  const details = day.markup ?? fallbackMarkup(day.date, venue);
   return `<article>\n<h1>${formatDate(day.date)}</h1>\n${details}\n</article>`;
 };
 
 const fetchDayAvailability = async (
   date: Date,
-  persons: number
+  persons: number,
+  venue: Venue
 ): Promise<DayAvailability> => {
-  const source = buildSourceUrl(date, persons);
+  const source = buildSourceUrl(date, persons, venue);
   const cached = availabilityCache.get(source);
   if (cached) {
     return { date, markup: cached };
@@ -101,10 +115,11 @@ const getOpenDates = (): Date[] =>
 
 const combineDays = async (
   dates: Date[],
-  persons: number
+  persons: number,
+  venue: Venue
 ): Promise<DayAvailability[]> => {
   const settled = await Promise.allSettled(
-    dates.map((date) => fetchDayAvailability(date, persons))
+    dates.map((date) => fetchDayAvailability(date, persons, venue))
   );
 
   return settled.map((result, index) => {
@@ -120,19 +135,26 @@ const combineDays = async (
   });
 };
 
-const writePage = async (res: ServerResponse, persons: number): Promise<void> => {
+const writePage = async (
+  res: ServerResponse,
+  persons: number,
+  venue: Venue,
+  showKulma: boolean
+): Promise<void> => {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.write("<!DOCTYPE html>");
-  res.write(head);
+  res.write(head(venue, showKulma));
 
-  const dayAvailabilities = await combineDays(getOpenDates(), persons);
+  const dayAvailabilities = await combineDays(getOpenDates(), persons, venue);
   const errorCount = dayAvailabilities.filter((day) => day.error).length;
   if (errorCount > 0) {
-    console.warn(`[availability] ${errorCount} days failed for persons=${persons}`);
+    console.warn(
+      `[availability] ${errorCount} days failed for persons=${persons} venue=${venue.referralKey}`
+    );
   }
 
   res.end(
-    dayAvailabilities.map(renderArticle).join("\n") +
+    dayAvailabilities.map((day) => renderArticle(day, venue)).join("\n") +
       '<article><a href="https://github.com/eeroan/basbas" target="_blank" rel="noreferrer">L&auml;hdekoodi</a></article></body></html>'
   );
 };
@@ -144,9 +166,11 @@ createServer((req, res) => {
   const isGet = req.method === "GET";
   const personsRaw = parsedUrl.query?.persons;
   const persons = clampPersons(typeof personsRaw === "string" ? Number(personsRaw) : 2);
+  const showKulma = parsedUrl.query?.kulma !== undefined;
+  const venue = showKulma ? venues.kulma : venues.bistro;
 
   if (isGet && uri === "/") {
-    void writePage(res, persons).catch((error: Error) => {
+    void writePage(res, persons, venue, showKulma).catch((error: Error) => {
       console.error(`[server] failed to render page: ${error.message}`);
       res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Failed to render page");
@@ -166,10 +190,10 @@ createServer((req, res) => {
   notFound(res);
 }).listen(port, () => console.timeEnd(startMsg));
 
-const head = `<html>
+const head = (venue: Venue, showKulma: boolean): string => `<html>
 <head>
 <!-- Server started: ${startedTime}-->
-<title>Basbas</title>
+<title>BasBas</title>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="apple-touch-icon" href="menu.png"/>
@@ -179,7 +203,12 @@ const head = `<html>
 <body>
 <article>
 <header>
-<h1>Basbas p&ouml;yt&auml;varaukset</h1>
+<h1>${venue.name} p&ouml;yt&auml;&shy;varaukset</h1>
 <p class="subtitle"><a href="http://basbas.fi/bistro#reservation" target="_blank" rel="noreferrer">Varaa t&auml;&auml;lt&auml;</a></p>
+${
+  showKulma
+    ? '<p class="subtitle"><a href="/">BasBas Bistro p&ouml;yt&auml;&shy;varaukset</a></p>'
+    : '<p class="subtitle"><a href="/?kulma=1">BasBas Kulma p&ouml;yt&auml;&shy;varaukset</a></p>'
+}
 </header>
 </article>`;
