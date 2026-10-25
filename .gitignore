@@ -1,5 +1,7 @@
-node_modules
-dist
+basbas
+.terraform/
+*.tfstate
+*.tfstate.backup
 .idea
 *.log
 output

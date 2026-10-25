@@ -1,13 +1,18 @@
-# Basbas table reservations 
-
-https://basbas.herokuapp.com
+# Basbas table reservations
 
 ## Development
 
-- `npm install`
-- `npm run dev`
+    go run .
 
-## Production
+## Test
 
-- `npm run build`
-- `npm start`
+    go test ./...
+
+## Deploy
+
+    podman login rg.nl-ams.scw.cloud
+    podman build -t rg.nl-ams.scw.cloud/basbas/basbas:latest .
+    podman push rg.nl-ams.scw.cloud/basbas/basbas:latest
+    cd terraform
+    terraform init
+    terraform apply
