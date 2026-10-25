@@ -37,11 +37,7 @@ resource "scaleway_container" "basbas" {
 
   min_scale          = 0
   max_scale          = var.max_scale
-  memory_limit_bytes = 134217728
+  memory_limit_bytes = 146800640
   cpu_limit          = 140
   timeout            = 30
-
-  environment_variables = {
-    PORT = "8080"
-  }
 }
