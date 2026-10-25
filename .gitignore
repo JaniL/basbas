@@ -5,3 +5,4 @@ basbas
 .idea
 *.log
 output
+.env
